@@ -1,0 +1,20 @@
+# Run by the PushManual trigger after you approve the build.
+# Checks the code, then rebuilds taxi.yellow_temporal_sample only if it is
+# missing, the query changed, or the public source data was updated.
+steps:
+  - id: check-and-update-sample
+    name: python:3.12-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        pip install --quiet --root-user-action=ignore -r requirements.txt
+        python -m py_compile create_yellow_temporal_sample.py
+        python create_yellow_temporal_sample.py --if-needed
+
+timeout: 1800s
+
+options:
+  # Required when a trigger runs as a custom service account.
+  logging: CLOUD_LOGGING_ONLY
