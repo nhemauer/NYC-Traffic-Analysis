@@ -1,0 +1,14 @@
+.adk/
+__pycache__/
+
+# Secrets and credentials: never commit these
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*-key.json
+*credentials*.json
+service-account*.json
+client_secret*.json
