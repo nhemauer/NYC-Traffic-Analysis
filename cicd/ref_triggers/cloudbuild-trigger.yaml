@@ -1,8 +1,8 @@
 approvalConfig:
   approvalRequired: true
-autodetect: true
 createTime: '2026-11-06T19:05:10.932076115Z'
 description: Trigger to continuously deploy with manual approval upon Repo push.
+filename: cicd/cloudbuild.yaml
 github:
   name: NYC-Traffic-Analysis
   owner: nhemauer
