@@ -2,5 +2,6 @@
 pandas>=2.2
 pyarrow>=15
 db-dtypes>=1.2
-scikit-learn>=1.5
+# Must match taxi_explorer/requirements.txt, or the agent can't load the model.
+scikit-learn==1.9.1
 joblib>=1.4

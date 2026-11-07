@@ -1,5 +1,8 @@
 """Ask questions in plain English about the NYC taxi data in BigQuery.
 
+The agent can also estimate a trip's fare with the random forest in
+fare_model.joblib. Build that file first with `python model/train_fare_rf.py`.
+
 Usage:
     python taxi_explorer/agent.py                       # interactive chat
     python taxi_explorer/agent.py "Busiest year?"       # ask one question and exit
@@ -10,10 +13,15 @@ Requires: pip install -r requirements-agent.txt
 """
 
 import asyncio
+import functools
 import os
 import sys
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import google.auth
+import joblib
+import pandas as pd
 from google.adk.agents import Agent
 from google.adk.integrations.bigquery import (
     BigQueryCredentialsConfig,
@@ -23,12 +31,20 @@ from google.adk.integrations.bigquery.config import BigQueryToolConfig, WriteMod
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
+# A relative import works when ADK loads this as a package; running the file
+# directly needs the plain import instead.
+try:
+    from .features import build_features
+except ImportError:
+    from features import build_features
+
 PROJECT_ID = "traffic-513918"
 DATASET_ID = "taxi"
 TABLE_ID = "yellow_temporal_sample"
 BIGQUERY_LOCATION = "US"
 MODEL = "gemini-3.5-flash"
 MAX_BYTES_PER_QUERY = 1_000_000_000  # queries that would scan more than 1 GB fail
+FARE_MODEL_PATH = Path(__file__).resolve().parent / "fare_model.joblib"
 
 # Call Gemini through Vertex AI, using the same Google login as BigQuery.
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
@@ -49,7 +65,84 @@ describe the sample, so say so, and multiply by 1,000 if the user asks for an
 estimate of the real figure.
 
 Say plainly when the data can't answer a question. Never guess at a number.
+
+To estimate what a particular trip would cost, use predict_fare rather than
+SQL. It needs the distance in miles, the pickup date and time, the trip
+duration in minutes, and the number of passengers. Ask for any of these the
+user hasn't given, except passengers, which you can assume is 1 (say so). The
+estimate is the metered fare only, without tips, tolls or surcharges, so say
+that, and pass on any warnings the tool returns.
 """
+
+
+@functools.cache
+def _load_fare_model() -> dict:
+    """Load the model on first use, so the agent starts quickly."""
+    return joblib.load(FARE_MODEL_PATH)
+
+
+def predict_fare(
+    trip_distance_miles: float,
+    pickup_datetime: str,
+    duration_minutes: float,
+    passenger_count: int,
+) -> dict:
+    """Estimate the metered fare of a NYC yellow taxi trip with a trained model.
+
+    The fare excludes tips, tolls and surcharges.
+
+    Args:
+        trip_distance_miles: Trip distance in miles.
+        pickup_datetime: Pickup date and time in New York local time, as
+            "YYYY-MM-DD HH:MM", for example "2019-03-15 18:05".
+        duration_minutes: Time from pickup to dropoff, in minutes.
+        passenger_count: Number of passengers, from 1 to 6.
+
+    Returns:
+        The estimated fare in dollars, the model's typical error, and any
+        warnings about inputs outside what the model was trained on.
+    """
+    if not FARE_MODEL_PATH.exists():
+        return {"error": "The fare model hasn't been trained or deployed yet."}
+    try:
+        pickup = datetime.fromisoformat(pickup_datetime.strip())
+    except ValueError:
+        return {"error": 'pickup_datetime must look like "2019-03-15 18:05".'}
+    if trip_distance_miles <= 0 or duration_minutes <= 0:
+        return {"error": "Distance and duration must both be greater than zero."}
+
+    bundle = _load_fare_model()
+    trip = pd.DataFrame(
+        {
+            "pickup_datetime": [pickup],
+            "dropoff_datetime": [pickup + timedelta(minutes=duration_minutes)],
+            "trip_distance": [trip_distance_miles],
+            "passenger_count": [passenger_count],
+        }
+    )
+    fare = float(bundle["model"].predict(build_features(trip)[bundle["features"]])[0])
+
+    # The model only knows trips like the ones it was cleaned down to.
+    warnings = []
+    first_year, last_year = bundle["year_range"]
+    if not first_year <= pickup.year <= last_year:
+        warnings.append(
+            f"The model was trained on {first_year}-{last_year} trips, so this is "
+            f"priced as if it were {min(max(pickup.year, first_year), last_year)}."
+        )
+    if trip_distance_miles > 100:
+        warnings.append("Trips over 100 miles were not in the training data.")
+    if not 1 <= duration_minutes <= 180:
+        warnings.append("Trips under 1 minute or over 3 hours were not in the training data.")
+    if not 1 <= passenger_count <= 6:
+        warnings.append("Only trips with 1-6 passengers were in the training data.")
+
+    return {
+        "estimated_fare_usd": round(fare, 2),
+        "typical_error_usd": round(bundle["test_scores"]["mae"], 2),
+        "includes": "metered fare only, no tips, tolls or surcharges",
+        "warnings": warnings,
+    }
 
 credentials, _ = google.auth.default()
 
@@ -70,7 +163,7 @@ root_agent = Agent(
     name="taxi_data_explorer",
     model=MODEL,
     instruction=INSTRUCTION,
-    tools=[bigquery_tools],
+    tools=[bigquery_tools, predict_fare],
 )
 
 

@@ -1,1 +1,6 @@
 google-cloud-bigquery>=3.20
+# For the fare model. scikit-learn must match the version that trained
+# fare_model.joblib (see requirements-model.txt), or the model won't load.
+scikit-learn==1.9.1
+joblib>=1.4
+pandas>=2.2

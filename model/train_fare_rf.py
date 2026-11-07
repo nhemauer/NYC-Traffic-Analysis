@@ -215,6 +215,8 @@ def main() -> None:
         "sklearn_version": sklearn.__version__,
         "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "training_rows": len(train),
+        # The forest can't extrapolate: later years are priced like the last one.
+        "year_range": [int(train["year"].min()), int(train["year"].max())],
         "test_scores": forest_scores,
         "cv_mae": -search.best_score_,
         "params": forest.get_params(),

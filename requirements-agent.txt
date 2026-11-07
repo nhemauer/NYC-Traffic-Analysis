@@ -1,2 +1,3 @@
 -r requirements.txt
+-r taxi_explorer/requirements.txt
 google-adk>=2.13
