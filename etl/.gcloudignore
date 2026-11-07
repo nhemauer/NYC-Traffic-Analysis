@@ -1,0 +1,3 @@
+# Keeps these out of the tlc-loader image upload.
+__pycache__
+*.sh

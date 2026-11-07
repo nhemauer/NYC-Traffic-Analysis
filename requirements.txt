@@ -1,1 +1,1 @@
-google-cloud-bigquery>=3.20
+-r etl/requirements.txt
