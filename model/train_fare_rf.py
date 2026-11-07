@@ -4,8 +4,9 @@ Features: year, trip distance, passenger count, pickup hour / day of week /
 month, and trip duration (dropoff minus pickup). Target: fare_amount, the
 metered fare before tips, tolls and surcharges.
 
-The trips come from `taxi.yellow_temporal_sample` in BigQuery. The first run
-saves them to data/ so later runs don't query BigQuery again.
+The trips come from the `taxi.yellow_trips_sample` view in BigQuery. The first
+run saves them to data/ so later runs don't query BigQuery again; use
+--refresh after loading new TLC months.
 
 Tree depth and leaf size are tuned with a small grid search, scoring each
 setting by 3-fold cross-validation on the training trips. The held-out test
@@ -49,8 +50,9 @@ sys.path.insert(0, str(ROOT / "taxi_explorer"))
 from features import FEATURES, build_features  # noqa: E402
 
 PROJECT_ID = "traffic-513918"
-TABLE_REF = f"{PROJECT_ID}.taxi.yellow_temporal_sample"
-CACHE_PATH = ROOT / "data" / "yellow_temporal_sample.parquet"
+# View joining the 2011 - Nov 2022 sample with the TLC months loaded since.
+TABLE_REF = f"{PROJECT_ID}.taxi.yellow_trips_sample"
+CACHE_PATH = ROOT / "data" / "yellow_trips_sample.parquet"
 MODEL_PATH = ROOT / "taxi_explorer" / "fare_model.joblib"
 TARGET = "fare_amount"
 SEED = 1337  # used for every random step: sampling, splits, folds and trees
