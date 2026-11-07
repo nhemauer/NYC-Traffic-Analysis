@@ -10,11 +10,11 @@ The table only needs rebuilding when one of these is true:
 Checking this only reads table metadata, so it's free.
 
 Usage:
-    python create_yellow_temporal_sample.py              # always rebuild
-    python create_yellow_temporal_sample.py --check      # report whether a rebuild is needed
-    python create_yellow_temporal_sample.py --if-needed  # rebuild only if needed (used by Cloud Build)
-    python create_yellow_temporal_sample.py --dry-run    # estimate bytes a rebuild would scan
-    python create_yellow_temporal_sample.py --stamp      # mark an existing table as built from this query
+    python etl/create_yellow_temporal_sample.py              # always rebuild
+    python etl/create_yellow_temporal_sample.py --check      # report whether a rebuild is needed
+    python etl/create_yellow_temporal_sample.py --if-needed  # rebuild only if needed (used by Cloud Build)
+    python etl/create_yellow_temporal_sample.py --dry-run    # estimate bytes a rebuild would scan
+    python etl/create_yellow_temporal_sample.py --stamp      # mark an existing table as built from this query
 
 Auth: run `gcloud auth application-default login` once beforehand.
 Requires: pip install -r requirements.txt

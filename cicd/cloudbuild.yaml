@@ -10,8 +10,8 @@ steps:
       - |
         set -e
         pip install --quiet --root-user-action=ignore -r requirements.txt
-        python -m py_compile create_yellow_temporal_sample.py
-        python create_yellow_temporal_sample.py --if-needed
+        python -m py_compile etl/create_yellow_temporal_sample.py
+        python etl/create_yellow_temporal_sample.py --if-needed
 
 timeout: 1800s
 
