@@ -1,0 +1,6 @@
+-r requirements.txt
+pandas>=2.2
+pyarrow>=15
+db-dtypes>=1.2
+scikit-learn>=1.5
+joblib>=1.4

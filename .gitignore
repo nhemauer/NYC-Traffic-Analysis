@@ -12,3 +12,10 @@ __pycache__/
 *credentials*.json
 service-account*.json
 client_secret*.json
+
+
+# Personal Notes
+agent_instructions.txt
+# Cached training data and trained models
+data/
+*.joblib
