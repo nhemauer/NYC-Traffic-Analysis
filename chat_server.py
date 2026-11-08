@@ -54,6 +54,7 @@ ANSWER_TIMEOUT_SECONDS = 120
 MAX_LLM_CALLS_PER_QUESTION = 10
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS",
+    "https://nickhemauer.com,https://www.nickhemauer.com,"
     "https://nhemauer-website.web.app,https://nhemauer-website.firebaseapp.com",
 ).split(",")
 
