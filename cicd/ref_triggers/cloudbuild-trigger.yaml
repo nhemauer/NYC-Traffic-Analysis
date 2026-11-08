@@ -7,8 +7,15 @@ github:
   name: NYC-Traffic-Analysis
   owner: nhemauer
   push:
-    branch: .*
+    branch: ^main$
 id: d1f4a4a7-d477-4190-95b2-1794fbc9ca94
+includedFiles:
+- chat_server.py
+- Dockerfile
+- requirements*.txt
+- taxi_explorer/**
+- etl/**
+- cicd/**
 name: PushManual
 resourceName: projects/traffic-513918/locations/global/triggers/d1f4a4a7-d477-4190-95b2-1794fbc9ca94
 serviceAccount: projects/traffic-513918/serviceAccounts/broad-993@traffic-513918.iam.gserviceaccount.com
