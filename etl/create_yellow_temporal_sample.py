@@ -106,10 +106,17 @@ def needs_rebuild(client: bigquery.Client) -> tuple[bool, str]:
 
 
 def create_dataset(client: bigquery.Client) -> None:
-    """Equivalent of CREATE SCHEMA IF NOT EXISTS ... OPTIONS (location = 'US')."""
-    dataset = bigquery.Dataset(f"{PROJECT_ID}.{DATASET_ID}")
-    dataset.location = LOCATION
-    client.create_dataset(dataset, exists_ok=True)
+    """Equivalent of CREATE SCHEMA IF NOT EXISTS ... OPTIONS (location = 'US').
+
+    Looks first, because the Cloud Build account may only edit the dataset,
+    not create datasets, and BigQuery then refuses even an exists_ok create.
+    """
+    try:
+        client.get_dataset(f"{PROJECT_ID}.{DATASET_ID}")
+    except NotFound:
+        dataset = bigquery.Dataset(f"{PROJECT_ID}.{DATASET_ID}")
+        dataset.location = LOCATION
+        client.create_dataset(dataset)
     print(f"Dataset {PROJECT_ID}.{DATASET_ID} is ready.")
 
 
