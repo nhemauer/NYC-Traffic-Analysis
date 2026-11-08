@@ -1,8 +1,17 @@
 # Run by the PushManual trigger after you approve the build.
-# Checks the code, then rebuilds taxi.yellow_temporal_sample only if it is
-# missing, the query changed, or the public source data was updated.
-# New TLC months are loaded by the weekly tlc-loader job instead
-# (etl/setup_scheduled_loader.sh); this build only checks that code compiles.
+#
+# On every branch: checks the code, then rebuilds taxi.yellow_temporal_sample
+# only if it is missing, the query changed, or the public source data was
+# updated. New TLC months are loaded by the weekly tlc-loader job instead
+# (etl/setup_scheduled_loader.sh).
+#
+# On main only: builds the website's chat service (chat_server.py and the
+# taxi_explorer agent), checks that it starts with its models, and deploys it
+# to Cloud Run as taxi-chat.
+#
+# The trained models are git-ignored, so the build takes them from
+# gs://traffic-513918-models. After retraining, upload them before pushing:
+#   gcloud storage cp taxi_explorer/*.joblib gs://traffic-513918-models/
 steps:
   - id: check-and-update-sample
     name: python:3.12-slim
@@ -12,11 +21,62 @@ steps:
       - |
         set -e
         pip install --quiet --root-user-action=ignore -r requirements.txt
-        python -m py_compile etl/create_yellow_temporal_sample.py etl/load_tlc_months.py
+        python -m py_compile etl/create_yellow_temporal_sample.py etl/load_tlc_months.py \
+          chat_server.py taxi_explorer/agent.py taxi_explorer/features.py \
+          taxi_explorer/forecast_features.py
         python etl/create_yellow_temporal_sample.py --if-needed
+
+  - id: fetch-models
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "$BRANCH_NAME" != "main" ]; then echo "Not main: no deploy."; exit 0; fi
+        gcloud storage cp gs://traffic-513918-models/fare_model.joblib \
+          gs://traffic-513918-models/forecast_model.joblib taxi_explorer/
+
+  - id: build-chat
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "$BRANCH_NAME" != "main" ]; then exit 0; fi
+        set -e
+        docker build -t $_IMAGE:$SHORT_SHA .
+        # Start the app inside the image and load both models, so a broken
+        # build fails here instead of on the live site.
+        docker run --rm --network=cloudbuild $_IMAGE:$SHORT_SHA python -c "
+        import chat_server
+        from taxi_explorer.agent import _load_fare_model, _load_forecast_models
+        _load_fare_model(); _load_forecast_models()
+        print('chat server and models load')"
+        docker push $_IMAGE:$SHORT_SHA
+
+  # The service's public access, allowed origins and other settings carry
+  # over from the last deploy; only the image and these sizes are set here.
+  - id: deploy-chat
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "$BRANCH_NAME" != "main" ]; then exit 0; fi
+        set -e
+        gcloud run deploy taxi-chat --image $_IMAGE:$SHORT_SHA \
+          --region us-central1 \
+          --service-account taxi-agent-runner@$PROJECT_ID.iam.gserviceaccount.com \
+          --max-instances 1 --min-instances 1 --memory 1Gi --timeout 300 --quiet
+
+substitutions:
+  _IMAGE: us-central1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/taxi-chat
 
 timeout: 1800s
 
 options:
   # Required when a trigger runs as a custom service account.
   logging: CLOUD_LOGGING_ONLY
+  # Lets $_IMAGE refer to $PROJECT_ID.
+  substitution_option: ALLOW_LOOSE
+  dynamic_substitutions: true
