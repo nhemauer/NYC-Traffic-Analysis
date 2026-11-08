@@ -49,9 +49,10 @@ PER_MINUTE_LIMIT = 6  # questions per visitor (IP address)
 PER_DAY_LIMIT = 5
 DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "25"))
 ANSWER_TIMEOUT_SECONDS = 120
-# Gemini calls per question. A normal answer takes 2-4 (look up a table, run
-# SQL, answer); ADK's default of 500 would let one question run up the bill.
-MAX_LLM_CALLS_PER_QUESTION = 10
+# Gemini calls per question. Simple answers take 2-3; open questions such as
+# "how did COVID change trips?" explore and can take over 10. ADK's default of
+# 500 would let one question run up the bill.
+MAX_LLM_CALLS_PER_QUESTION = int(os.environ.get("MAX_LLM_CALLS", "20"))
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS",
     "https://nickhemauer.com,https://www.nickhemauer.com,"
@@ -154,6 +155,20 @@ async def _run(session_id: str, question: str) -> ChatResponse:
     return ChatResponse(session_id=session_id, answer=answer, sql=sql, tools=tools)
 
 
+def _hit_call_limit(exc: BaseException) -> bool:
+    """Whether the error, or one it was raised from, is ADK's call limit.
+
+    ADK wraps it in its own errors, so look along the chain by name.
+    """
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        if type(exc).__name__ == "LlmCallsLimitExceededError":
+            return True
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
 @app.get("/healthz")
 def healthz() -> dict:
     return {"ok": True}
@@ -183,7 +198,14 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
         result = await asyncio.wait_for(_run(session_id, question), ANSWER_TIMEOUT_SECONDS)
     except TimeoutError:
         raise HTTPException(504, "The agent took too long. Try a simpler question.")
-    except Exception:
+    except Exception as exc:
+        if _hit_call_limit(exc):
+            log.warning("Question hit the %d-call limit: %r", MAX_LLM_CALLS_PER_QUESTION, question)
+            raise HTTPException(
+                422,
+                "That question needed more steps than this demo allows. Try asking "
+                "about one part of it at a time.",
+            )
         log.exception("Agent failed on a question")
         raise HTTPException(502, "The agent hit an error. Try again, or rephrase the question.")
     if not result.answer:
