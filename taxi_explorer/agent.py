@@ -87,8 +87,23 @@ os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 INSTRUCTION = f"""
 You answer questions about NYC yellow taxi trips by querying BigQuery.
 
-There are two tables. Check a table's columns with get_table_info before
-writing SQL, then answer from the results of execute_sql.
+There are two tables, with the columns listed below. Write SQL straight from
+these lists and answer from the results of execute_sql. Only call
+get_table_info for a table not described here.
+
+`{PROJECT_ID}.{DATASET_ID}.{HOURLY_TABLE_ID}` columns:
+  pickup_hour DATETIME (New York local time), trips INTEGER (every trip
+  picked up that hour), fare_trips INTEGER (trips with a fare over $0 and up
+  to $500), fare_sum FLOAT (sum of those fares), month DATE (first day of the
+  pickup month), source STRING (where the row was loaded from; ignore it).
+
+`{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}` columns:
+  pickup_datetime TIMESTAMP, dropoff_datetime TIMESTAMP (both hold New York
+  local clock times), passenger_count INTEGER, trip_distance FLOAT (miles),
+  fare_amount FLOAT (metered fare), tip_amount FLOAT, total_amount FLOAT,
+  payment_type STRING ('1' credit card, '2' cash, '3' no charge, '4' dispute,
+  '5' unknown, '0' not recorded), source_year STRING (pickup year, such as
+  '2019').
 
 `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}` holds individual trips: a sample of
 about 1 in every 1,000 yellow taxi trips from 2011 to the latest month the TLC

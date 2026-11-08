@@ -1,8 +1,10 @@
 """A public chat endpoint for the taxi agent, called by the personal website.
 
 ADK's own server (`adk web`, `adk api_server`) exposes every session and user
-endpoint, so it stays private. This serves one POST /chat route instead, with
-limits so a public page can't run up the Gemini and BigQuery bill.
+endpoint, so it stays private. This serves only POST /chat/stream (which the
+page uses: progress and the answer arrive as they happen) and POST /chat (the
+whole answer at once), with limits so a public page can't run up the Gemini
+and BigQuery bill.
 
 Sessions and rate limits live in memory, so the Cloud Run service must run a
 single instance (--max-instances 1), kept running (--min-instances 1) so the
@@ -24,6 +26,7 @@ Settings (environment variables):
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -32,7 +35,8 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from google.adk.agents.run_config import RunConfig
+from fastapi.responses import StreamingResponse
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -136,23 +140,64 @@ async def _forget_idle_sessions() -> None:
             del recent_by_visitor[visitor]
 
 
-async def _run(session_id: str, question: str) -> ChatResponse:
+# What the page shows while each tool runs.
+STEP_LABELS = {
+    "list_table_ids": "Listing the tables",
+    "get_table_info": "Reading a table's columns",
+    "execute_sql": "Running a BigQuery query",
+    "predict_fare": "Estimating the fare with the random forest",
+    "forecast_trips": "Forecasting with the gradient-boosted models",
+}
+LIMIT_MESSAGE = (
+    "That question needed more steps than this demo allows. Try asking about "
+    "one part of it at a time."
+)
+ERROR_MESSAGE = "The agent hit an error. Try again, or rephrase the question."
+EMPTY_MESSAGE = "I couldn't come up with an answer to that. Try rephrasing it."
+
+
+async def _events(session_id: str, question: str):
+    """Run the agent on one question, yielding what it does as it happens.
+
+    Yields dicts: {"type": "step", "text"} when a tool starts, "sql" with
+    each query, "delta" with pieces of the answer as Gemini writes it, and
+    finally "done" with the whole answer. Raises if the agent fails.
+    """
     message = types.Content(role="user", parts=[types.Part(text=question)])
     answer, sql, tools = "", [], []
     async for event in runner.run_async(
         user_id=USER_ID,
         session_id=session_id,
         new_message=message,
-        run_config=RunConfig(max_llm_calls=MAX_LLM_CALLS_PER_QUESTION),
+        run_config=RunConfig(
+            max_llm_calls=MAX_LLM_CALLS_PER_QUESTION,
+            streaming_mode=StreamingMode.SSE,
+        ),
     ):
+        parts = event.content.parts if event.content and event.content.parts else []
+        text = "".join(p.text or "" for p in parts if not p.thought)
+        if event.partial:
+            # Streaming sends tool calls twice; act on the complete copy only.
+            if text:
+                yield {"type": "delta", "text": text}
+            continue
         for call in event.get_function_calls():
+            yield {"type": "step", "text": STEP_LABELS.get(call.name, f"Using {call.name}")}
             if call.name == "execute_sql":
-                sql.append(call.args.get("query", ""))
+                query = call.args.get("query", "")
+                sql.append(query)
+                yield {"type": "sql", "query": query}
             elif call.name not in tools:
                 tools.append(call.name)
-        if event.is_final_response() and event.content and event.content.parts:
-            answer = "".join(part.text or "" for part in event.content.parts)
-    return ChatResponse(session_id=session_id, answer=answer, sql=sql, tools=tools)
+        if event.is_final_response() and text:
+            answer = text
+    yield {
+        "type": "done",
+        "session_id": session_id,
+        "answer": answer or EMPTY_MESSAGE,
+        "sql": sql,
+        "tools": tools,
+    }
 
 
 def _hit_call_limit(exc: BaseException) -> bool:
@@ -169,13 +214,19 @@ def _hit_call_limit(exc: BaseException) -> bool:
     return False
 
 
-@app.get("/healthz")
-def healthz() -> dict:
-    return {"ok": True}
+def _failure(exc: Exception, question: str) -> tuple[int, str]:
+    """The status code and visitor-facing message for an agent failure."""
+    if isinstance(exc, TimeoutError):
+        return 504, "The agent took too long. Try a simpler question."
+    if _hit_call_limit(exc):
+        log.warning("Question hit the %d-call limit: %r", MAX_LLM_CALLS_PER_QUESTION, question)
+        return 422, LIMIT_MESSAGE
+    log.error("Agent failed on a question", exc_info=exc)
+    return 502, ERROR_MESSAGE
 
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(body: ChatRequest, request: Request) -> ChatResponse:
+async def _start(body: ChatRequest, request: Request) -> tuple[str, str]:
+    """Check the question and the limits, and return (session id, question)."""
     question = body.message.strip()
     if not question:
         raise HTTPException(400, "Ask a question first.")
@@ -193,21 +244,53 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
         sessions[session_id] = [time.monotonic(), 0]
     sessions[session_id][0] = time.monotonic()
     sessions[session_id][1] += 1
+    return session_id, question
+
+
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"ok": True}
+
+
+@app.post("/chat/stream")
+async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
+    """Answer one question, sending progress as it happens.
+
+    The body is newline-delimited JSON: one object per line, as described in
+    _events, or {"type": "error", "detail"} if the agent fails partway.
+    Limits are checked first, so a refused question still gets a plain 429.
+    """
+    session_id, question = await _start(body, request)
+
+    async def lines():
+        try:
+            async with asyncio.timeout(ANSWER_TIMEOUT_SECONDS):
+                async for item in _events(session_id, question):
+                    yield json.dumps(item) + "\n"
+        except Exception as exc:
+            _, detail = _failure(exc, question)
+            yield json.dumps({"type": "error", "detail": detail}) + "\n"
+
+    return StreamingResponse(
+        lines(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(body: ChatRequest, request: Request) -> ChatResponse:
+    """Answer one question in a single response (the page before streaming)."""
+    session_id, question = await _start(body, request)
+
+    async def collect() -> dict:
+        async for item in _events(session_id, question):
+            if item["type"] == "done":
+                return item
+        raise RuntimeError("The agent stopped without finishing.")
 
     try:
-        result = await asyncio.wait_for(_run(session_id, question), ANSWER_TIMEOUT_SECONDS)
-    except TimeoutError:
-        raise HTTPException(504, "The agent took too long. Try a simpler question.")
+        done = await asyncio.wait_for(collect(), ANSWER_TIMEOUT_SECONDS)
     except Exception as exc:
-        if _hit_call_limit(exc):
-            log.warning("Question hit the %d-call limit: %r", MAX_LLM_CALLS_PER_QUESTION, question)
-            raise HTTPException(
-                422,
-                "That question needed more steps than this demo allows. Try asking "
-                "about one part of it at a time.",
-            )
-        log.exception("Agent failed on a question")
-        raise HTTPException(502, "The agent hit an error. Try again, or rephrase the question.")
-    if not result.answer:
-        result.answer = "I couldn't come up with an answer to that. Try rephrasing it."
-    return result
+        raise HTTPException(*_failure(exc, question))
+    return ChatResponse(**{k: v for k, v in done.items() if k != "type"})
