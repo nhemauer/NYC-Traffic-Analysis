@@ -1,0 +1,14 @@
+# Files left out of `gcloud run deploy --source .` uploads.
+# The trained models (*.joblib) are git-ignored but must be uploaded, so this
+# list doesn't include .gitignore.
+.git/
+.gitignore
+.venv/
+.adk/
+data/
+model/
+cicd/
+**/__pycache__/
+.env
+.env.*
+agent_instructions.txt

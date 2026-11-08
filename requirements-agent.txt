@@ -1,3 +1,6 @@
 -r requirements.txt
 -r taxi_explorer/requirements.txt
 google-adk>=2.13
+# For chat_server.py, the website's endpoint (both also come with google-adk).
+fastapi>=0.115
+uvicorn>=0.30

@@ -59,7 +59,10 @@ TABLE_ID = "yellow_trips_sample"  # view: 2011 to the latest TLC month
 HOURLY_TABLE_ID = "hourly_trips"
 BIGQUERY_LOCATION = "US"
 MODEL = "gemini-3.5-flash"
-MAX_BYTES_PER_QUERY = 1_000_000_000  # queries that would scan more than 1 GB fail
+# Queries that would scan more than 250 MB fail. All the taxi tables together
+# are about 115 MB (Nov 2026), so this only stops queries against other, much
+# larger public datasets, which would be billed to this project.
+MAX_BYTES_PER_QUERY = 250_000_000
 FARE_MODEL_PATH = Path(__file__).resolve().parent / "fare_model.joblib"
 FORECAST_MODEL_PATH = Path(__file__).resolve().parent / "forecast_model.joblib"
 FORECAST_GRANULARITIES = ("hour", "day", "week", "month", "hour_of_day")
