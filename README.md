@@ -14,9 +14,9 @@ Ask questions in plain English about NYC yellow taxi trips from 2011 to today. A
 
 ## Agent
 
-- Built on Gemini 3.5 Flash and querying BigQuery from natural-language questions.
+- Gemini 3.5 Flash queries BigQuery from natural-language questions.
 - Has the fare and forecast models below as tools.
-- **Faster responses:** the table schemas and the current date are written into the agent's instructions, so it doesn't have to look up the tables for every request.
+- **Faster responses:** the table schemas and the current date are written into the agent's instructions.
 - **CI/CD:** a Cloud Build trigger redeploys the agent whenever the code changes in the repo.
 
 ## Trained and Deployed Models
@@ -35,4 +35,5 @@ Ask questions in plain English about NYC yellow taxi trips from 2011 to today. A
 
 ## Website
 
-- Hosted on Firebase, and GitHub Actions redeploys it whenever the [site's repo](https://github.com/nhemauer/Personal-Website) changes.
+- Hosted on Firebase
+- GitHub Actions redeploys it whenever the [site's repo](https://github.com/nhemauer/Personal-Website) changes.
